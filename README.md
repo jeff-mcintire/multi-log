@@ -20,7 +20,7 @@ The **immutability core** — the novel, highest-risk part of the system — wit
 |---------|------|---------|
 | WORM store | durably **stores** the checkpoint object, immutably | **S3 Object Lock** (COMPLIANCE mode) — real, via AWS SDK v2 |
 | Timestamp authority | **attests** the checkpoint id with a signed token | **RFC 3161** — real, talks to any TSA |
-| Public chain | **attests** the checkpoint id, anchored publicly | OpenTimestamps — *interface ready, client is the next piece* |
+| Public chain | **attests** the checkpoint id, anchored to Bitcoin | **OpenTimestamps** — real client; proofs validate in the official `ots` CLI |
 
 The two kinds aren't symmetric: WORM stores the object; a notary returns a
 self-verifying proof you keep. Three independent witnesses = one WORM store + two
@@ -55,6 +55,11 @@ go test -tags integration ./...                     # MinIO + a public TSA
 - `rfc3161` test obtains a **real signed timestamp token** from a public TSA
   (DigiCert), verifies it attests our checkpoint id, and confirms it does *not*
   verify against any other id.
+- `opentimestamps` test stamps a checkpoint id against the **public OTS calendar
+  servers**, gets a real `.ots` proof, verifies it binds to the id, and rejects
+  any other id. The proof is standards-compliant — the official `ots info` CLI
+  parses it. Bitcoin confirmation is asynchronous (hours); `VerifyBitcoin` checks
+  an upgraded proof's Merkle root against the real chain via a block explorer.
 
 ## Layout
 
@@ -66,6 +71,7 @@ go test -tags integration ./...                     # MinIO + a public TSA
 | `internal/witness/` | `CheckpointStore` + `Notary` interfaces; in-memory + mock impls | — |
 | `internal/witness/s3worm/` | **S3 Object Lock** WORM store (AWS SDK v2) | S3, isolated account |
 | `internal/witness/rfc3161/` | **RFC 3161** timestamp notary | a TSA |
+| `internal/witness/opentimestamps/` | **OpenTimestamps** notary + `.ots` wire codec | public calendars + Bitcoin |
 | `internal/verify/` | Recompute everything; match WORM + notary proofs | verifier service + customer CLI |
 | `cmd/demo/` | Wires it together and runs the tamper scenarios | — |
 | `deploy/docker-compose.yml` | Local infra (MinIO now; full stack in Phase 1) | — |

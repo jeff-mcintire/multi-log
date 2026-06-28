@@ -8,6 +8,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.104.0
 	github.com/aws/smithy-go v1.27.1
 	github.com/digitorus/timestamp v0.0.0-20250524132541-c45532741eea
+	golang.org/x/crypto v0.53.0
 )
 
 require (
