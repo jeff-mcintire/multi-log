@@ -1,18 +1,133 @@
-# Local infrastructure for multi-log.
+# Full local stack for multi-log Phase 1.
 #
-# Today this provides MinIO, which implements S3 Object Lock and backs the WORM
-# witness integration test. Phase 1 will add ClickHouse, Postgres, Grafana, and
-# Vector here.
+#   docker compose -f deploy/docker-compose.yml up -d --build
+#   ./scripts/bootstrap.sh            # create a demo tenant + API key
 #
-#   docker compose -f deploy/docker-compose.yml up -d
-#   go test -tags integration ./...
+# Services: Postgres (control plane), ClickHouse (log store), the three Go
+# services (controlplane/gateway/queryproxy), Grafana (dashboards), and MinIO
+# (S3 Object Lock for the Phase 2 witness tests). Vector is under the "agents"
+# profile because it needs an API key from bootstrap first.
 services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: multilog
+    ports:
+      - "5434:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    environment:
+      CLICKHOUSE_DB: multilog
+      CLICKHOUSE_USER: multilog
+      CLICKHOUSE_PASSWORD: multilog
+    ports:
+      - "8123:8123" # HTTP
+      - "9009:9000" # native
+    ulimits:
+      nofile: 262144
+    volumes:
+      - ch-data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  controlplane:
+    build: ..
+    command: ["/usr/local/bin/controlplane"]
+    environment:
+      ADDR: ":8081"
+      PG_DSN: "postgres://postgres:postgres@postgres:5432/multilog"
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+
+  gateway:
+    build: ..
+    command: ["/usr/local/bin/gateway"]
+    environment:
+      ADDR: ":8080"
+      PG_DSN: "postgres://postgres:postgres@postgres:5432/multilog"
+      CH_ADDR: "clickhouse:9000"
+      CH_DB: "multilog"
+      CH_USER: "multilog"
+      CH_PASSWORD: "multilog"
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    restart: on-failure
+
+  queryproxy:
+    build: ..
+    command: ["/usr/local/bin/queryproxy"]
+    environment:
+      ADDR: ":8082"
+      PG_DSN: "postgres://postgres:postgres@postgres:5432/multilog"
+      CH_ADDR: "clickhouse:9000"
+      CH_DB: "multilog"
+      CH_USER: "multilog"
+      CH_PASSWORD: "multilog"
+    ports:
+      - "8082:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    restart: on-failure
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    environment:
+      GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+
+  vector:
+    image: timberio/vector:0.41.1-alpine
+    profiles: ["agents"]
+    command: ["--config", "/etc/vector/vector.toml"]
+    environment:
+      MULTILOG_API_KEY: "${MULTILOG_API_KEY:-}"
+    volumes:
+      - ./vector/vector.toml:/etc/vector/vector.toml:ro
+      - ./vector/sample:/var/log/sample:ro
+    depends_on:
+      - gateway
+    restart: on-failure
+
   minio:
     image: minio/minio
     command: server /data --console-address ":9001"
     ports:
-      - "9100:9000" # S3 API (used by the s3worm integration test)
-      - "9101:9001" # MinIO web console
+      - "9100:9000" # S3 API (s3worm integration test)
+      - "9101:9001" # console
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
@@ -20,4 +135,6 @@ services:
       - minio-data:/data
 
 volumes:
+  pg-data:
+  ch-data:
   minio-data:

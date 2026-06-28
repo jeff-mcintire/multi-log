@@ -1,0 +1,27 @@
+# Vector ships log files to the multi-log ingest gateway.
+#
+# Set MULTILOG_API_KEY (from ./scripts/bootstrap.sh) before starting:
+#   MULTILOG_API_KEY=mlog_... docker compose -f deploy/docker-compose.yml --profile agents up -d vector
+
+[sources.app_logs]
+type = "file"
+include = ["/var/log/sample/*.log"]
+read_from = "beginning"
+
+# Tag every event with a source label. The gateway reads `.source` and `.message`.
+[transforms.tag]
+type = "remap"
+inputs = ["app_logs"]
+source = '''
+.source = "infra-agent"
+'''
+
+[sinks.multilog]
+type = "http"
+inputs = ["tag"]
+uri = "http://gateway:8080/ingest"
+method = "post"
+encoding.codec = "json"
+
+[sinks.multilog.request.headers]
+X-API-Key = "${MULTILOG_API_KEY}"

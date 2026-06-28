@@ -1,0 +1,5 @@
+{"lvl":"info","msg":"service started","version":"1.4.2"}
+{"lvl":"info","msg":"user login","user":"alice","ip":"10.0.0.4"}
+{"lvl":"warn","msg":"slow query","ms":1240,"query":"orders.list"}
+{"lvl":"alert","msg":"unauthorized access attempt","user":"mallory","resource":"secrets"}
+{"lvl":"info","msg":"backup completed","size":"2.1GB"}

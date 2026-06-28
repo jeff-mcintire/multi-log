@@ -1,0 +1,41 @@
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: multilog
+    folder: multi-log
+    interval: 1m
+    rules:
+      - uid: multilog-crit-logs
+        title: Critical or alert-level logs detected
+        condition: C
+        for: 0m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+        annotations:
+          summary: alert/crit level log lines seen in the last 5 minutes
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: clickhouse
+            model:
+              refId: A
+              format: table
+              rawSql: >
+                SELECT count() AS value FROM multilog.logs
+                WHERE ingest_time > now() - INTERVAL 5 MINUTE
+                AND (positionCaseInsensitive(raw, '"alert"') > 0
+                  OR positionCaseInsensitive(raw, '"crit"') > 0)
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]

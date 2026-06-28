@@ -26,6 +26,40 @@ The two kinds aren't symmetric: WORM stores the object; a notary returns a
 self-verifying proof you keep. Three independent witnesses = one WORM store + two
 notaries.
 
+## Phase 1 — the data plane
+
+A multi-tenant, multi-source pipeline: agents ship logs → the gateway
+authenticates and seals them → ClickHouse stores them → the query API and Grafana
+read them back, strictly scoped per tenant.
+
+```
+Vector ─▶ gateway (X-API-Key → tenant, seal, seq+hash) ─▶ ClickHouse
+                              ▲                                  │
+        control plane (tenants + API keys, Postgres)            ▼
+                                              queryproxy / Grafana (tenant-scoped)
+```
+
+Run the whole stack:
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d --build
+./scripts/bootstrap.sh                 # creates a tenant, prints an API key
+
+export MULTILOG_API_KEY=mlog_...        # from bootstrap
+curl -s -X POST localhost:8080/ingest -H "X-API-Key: $MULTILOG_API_KEY" \
+  -d '[{"source":"api","message":"hello multi-log"}]'
+curl -s "localhost:8082/logs?q=hello" -H "X-API-Key: $MULTILOG_API_KEY"
+```
+
+- **Grafana** at <http://localhost:3000> (anonymous admin) with a provisioned
+  ClickHouse datasource, a logs dashboard, and a sample alert rule.
+- **Vector** (the agent path) ships sample logs once you set the key:
+  `MULTILOG_API_KEY=mlog_... docker compose -f deploy/docker-compose.yml --profile agents up -d vector`.
+
+Tenant isolation is enforced in the query API: a key resolves to exactly one
+tenant, and every query is bound to that tenant id — there is no cross-tenant
+read path.
+
 ## Run it
 
 ```bash
@@ -73,5 +107,10 @@ go test -tags integration ./...                     # MinIO + a public TSA
 | `internal/witness/rfc3161/` | **RFC 3161** timestamp notary | a TSA |
 | `internal/witness/opentimestamps/` | **OpenTimestamps** notary + `.ots` wire codec | public calendars + Bitcoin |
 | `internal/verify/` | Recompute everything; match WORM + notary proofs | verifier service + customer CLI |
+| `internal/logstore/` | ClickHouse log store: schema, batch append, tenant-scoped search | ClickHouse |
+| `internal/control/` | Postgres control plane: tenants + hashed API keys | Postgres |
+| `internal/ingest/` | Persistent sealer + ingest gateway handler | gateway service |
+| `internal/queryapi/` | Tenant-scoped read API | queryproxy service |
+| `cmd/gateway`, `cmd/controlplane`, `cmd/queryproxy` | Phase 1 service binaries | — |
 | `cmd/demo/` | Wires it together and runs the tamper scenarios | — |
 | `deploy/docker-compose.yml` | Local infra (MinIO now; full stack in Phase 1) | — |

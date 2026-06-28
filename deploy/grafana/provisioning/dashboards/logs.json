@@ -1,0 +1,61 @@
+{
+  "uid": "multilog-logs",
+  "title": "multi-log — logs",
+  "schemaVersion": 39,
+  "version": 1,
+  "time": { "from": "now-24h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "tenant",
+        "type": "textbox",
+        "label": "Tenant",
+        "current": { "text": "", "value": "" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Total log entries",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT count() AS total FROM multilog.logs WHERE ('$tenant' = '' OR tenant_id = '$tenant')",
+          "format": 1
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Entries per minute",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "gridPos": { "h": 6, "w": 16, "x": 8, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT toStartOfMinute(ingest_time) AS time, count() AS entries FROM multilog.logs WHERE ('$tenant' = '' OR tenant_id = '$tenant') GROUP BY time ORDER BY time",
+          "format": 0
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "Recent logs",
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "gridPos": { "h": 14, "w": 24, "x": 0, "y": 6 },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT ingest_time, tenant_id, source, raw FROM multilog.logs WHERE ('$tenant' = '' OR tenant_id = '$tenant') ORDER BY ingest_time DESC LIMIT 200",
+          "format": 1
+        }
+      ]
+    }
+  ]
+}
