@@ -1,0 +1,23 @@
+# Local infrastructure for multi-log.
+#
+# Today this provides MinIO, which implements S3 Object Lock and backs the WORM
+# witness integration test. Phase 1 will add ClickHouse, Postgres, Grafana, and
+# Vector here.
+#
+#   docker compose -f deploy/docker-compose.yml up -d
+#   go test -tags integration ./...
+services:
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9100:9000" # S3 API (used by the s3worm integration test)
+      - "9101:9001" # MinIO web console
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio-data:/data
+
+volumes:
+  minio-data:
