@@ -139,6 +139,42 @@ func (s *Store) Head(ctx context.Context, tenantID string) (nextSeq uint64, prev
 	return seq + 1, prev, nil
 }
 
+// Tenants returns the distinct tenant ids that have logs.
+func (s *Store) Tenants(ctx context.Context) ([]string, error) {
+	rows, err := s.conn.Query(ctx, "SELECT DISTINCT tenant_id FROM "+s.table())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// EntriesAsc returns a tenant's entries with seq >= startSeq in ascending order,
+// up to limit rows. The anchorer uses it to fetch newly-sealed entries; the
+// verifier uses it (from seq 0) to reload the full chain.
+func (s *Store) EntriesAsc(ctx context.Context, tenantID string, startSeq uint64, limit int) ([]*chain.Entry, error) {
+	if limit <= 0 {
+		limit = 100000
+	}
+	q := fmt.Sprintf(
+		"SELECT tenant_id, seq, event_time, ingest_time, source, raw, prev_hash, entry_hash FROM %s WHERE tenant_id = ? AND seq >= ? ORDER BY seq ASC LIMIT %d",
+		s.table(), limit)
+	rows, err := s.conn.Query(ctx, q, tenantID, startSeq)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanEntries(rows)
+}
+
 // SearchParams scopes a query. Zero-valued fields are ignored, except that the
 // caller MUST always supply a tenant id to Search — there is no cross-tenant read.
 type SearchParams struct {
@@ -183,7 +219,11 @@ func (s *Store) Search(ctx context.Context, tenantID string, p SearchParams) ([]
 		return nil, err
 	}
 	defer rows.Close()
+	return scanEntries(rows)
+}
 
+// scanEntries decodes a result set of log rows into entries.
+func scanEntries(rows driver.Rows) ([]*chain.Entry, error) {
 	var out []*chain.Entry
 	for rows.Next() {
 		var (
@@ -196,6 +236,7 @@ func (s *Store) Search(ctx context.Context, tenantID string, p SearchParams) ([]
 		}
 		e.EventTime = eventT.UnixNano()
 		e.IngestTime = ingestT.UnixNano()
+		var err error
 		if e.PrevHash, err = hex.DecodeString(prevHex); err != nil {
 			return nil, err
 		}

@@ -60,6 +60,42 @@ Tenant isolation is enforced in the query API: a key resolves to exactly one
 tenant, and every query is bound to that tenant id — there is no cross-tenant
 read path.
 
+## Phase 2 — anchoring + continuous verification
+
+The data plane and the immutability core are wired together by two services:
+
+```
+ClickHouse ─▶ anchorer (per-tenant checkpoints) ─▶ WORM (S3 Object Lock)
+                       │                          ├▶ RFC 3161 TSA   ┐ proofs
+                       │                          └▶ OpenTimestamps ┘ kept in Postgres
+                       ▼
+                 verifier ◀── reloads ClickHouse, matches against WORM + notary proofs
+                 GET /verify (on demand) + scheduled sweep (alerts on mismatch)
+```
+
+- **anchorer** (`cmd/anchorer`, port 8083): on a cadence (and via `POST /anchor`),
+  it reads entries sealed since each tenant's last checkpoint, batches them into
+  windows, writes each checkpoint to the WORM store + a Postgres working copy, and
+  stamps its id with every notary. Checkpoints chain and commit to entry counts.
+- **verifier** (`cmd/verifier`, port 8084): `GET /verify` reloads the chain from
+  ClickHouse, loads the proofs we hold, and matches everything against the WORM
+  record and the notaries — returning `409` with pinpointed issues on any
+  mismatch. A scheduled sweep logs an alert when tampering is detected.
+
+`NOTARY_MODE=mock` (default) keeps the stack fully offline and deterministic; set
+it to `real` to use a live RFC 3161 TSA and OpenTimestamps.
+
+The Phase 2 integration test (`internal/dataplane/phase2_e2e_test.go`) seals →
+anchors → verifies, then tampers the **actual ClickHouse rows** and proves
+detection: a naive edit (chain), a sophisticated edit that also recomputes the
+chain (WORM + both notary proofs disagree), and a tail truncation (committed
+count). Run it with the infra up:
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d clickhouse postgres minio
+go test -tags integration -run TestPhase2 ./internal/dataplane/...
+```
+
 ## Run it
 
 ```bash
@@ -111,6 +147,11 @@ go test -tags integration ./...                     # MinIO + a public TSA
 | `internal/control/` | Postgres control plane: tenants + hashed API keys | Postgres |
 | `internal/ingest/` | Persistent sealer + ingest gateway handler | gateway service |
 | `internal/queryapi/` | Tenant-scoped read API | queryproxy service |
+| `internal/anchorstore/` | Postgres working copy of checkpoints + notary proofs | Postgres |
+| `internal/anchor/` | Builds + anchors per-tenant checkpoints to the witnesses | anchorer service |
+| `internal/verifylive/` | Reloads ClickHouse + proofs, runs verification | verifier service |
+| `internal/witnessbuild/` | Builds WORM + notaries from env (shared by both) | — |
 | `cmd/gateway`, `cmd/controlplane`, `cmd/queryproxy` | Phase 1 service binaries | — |
+| `cmd/anchorer`, `cmd/verifier` | Phase 2 service binaries | — |
 | `cmd/demo/` | Wires it together and runs the tamper scenarios | — |
-| `deploy/docker-compose.yml` | Local infra (MinIO now; full stack in Phase 1) | — |
+| `deploy/docker-compose.yml` | Full local stack (infra + all services) | — |

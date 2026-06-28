@@ -94,6 +94,65 @@ services:
         condition: service_healthy
     restart: on-failure
 
+  anchorer:
+    build: ..
+    command: ["/usr/local/bin/anchorer"]
+    environment:
+      ADDR: ":8083"
+      ANCHOR_INTERVAL: "10s"
+      ANCHOR_WINDOW: "1000"
+      PG_DSN: "postgres://postgres:postgres@postgres:5432/multilog"
+      CH_ADDR: "clickhouse:9000"
+      CH_DB: "multilog"
+      CH_USER: "multilog"
+      CH_PASSWORD: "multilog"
+      # WORM (S3 Object Lock) via MinIO
+      S3_ENDPOINT: "http://minio:9000"
+      S3_BUCKET: "multilog-worm"
+      S3_REGION: "us-east-1"
+      S3_ACCESS_KEY: "minioadmin"
+      S3_SECRET_KEY: "minioadmin"
+      # NOTARY_MODE=mock keeps the stack offline; set "real" for live TSA + OTS
+      NOTARY_MODE: "mock"
+    ports:
+      - "8083:8083"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    restart: on-failure
+
+  verifier:
+    build: ..
+    command: ["/usr/local/bin/verifier"]
+    environment:
+      ADDR: ":8084"
+      VERIFY_INTERVAL: "30s"
+      PG_DSN: "postgres://postgres:postgres@postgres:5432/multilog"
+      CH_ADDR: "clickhouse:9000"
+      CH_DB: "multilog"
+      CH_USER: "multilog"
+      CH_PASSWORD: "multilog"
+      S3_ENDPOINT: "http://minio:9000"
+      S3_BUCKET: "multilog-worm"
+      S3_REGION: "us-east-1"
+      S3_ACCESS_KEY: "minioadmin"
+      S3_SECRET_KEY: "minioadmin"
+      NOTARY_MODE: "mock"
+    ports:
+      - "8084:8084"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    restart: on-failure
+
   grafana:
     image: grafana/grafana:11.2.0
     environment:

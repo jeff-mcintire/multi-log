@@ -7,7 +7,9 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -o /out/gateway ./cmd/gateway \
  && CGO_ENABLED=0 go build -o /out/controlplane ./cmd/controlplane \
- && CGO_ENABLED=0 go build -o /out/queryproxy ./cmd/queryproxy
+ && CGO_ENABLED=0 go build -o /out/queryproxy ./cmd/queryproxy \
+ && CGO_ENABLED=0 go build -o /out/anchorer ./cmd/anchorer \
+ && CGO_ENABLED=0 go build -o /out/verifier ./cmd/verifier
 
 FROM gcr.io/distroless/static-debian12
 COPY --from=build /out/ /usr/local/bin/
